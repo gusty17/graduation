@@ -1,0 +1,21 @@
+<h2>CSI Time-based Occupancy Dashboard</h2>
+
+<form id="uploadForm">
+  <input type="file" name="file" accept=".csv" required />
+  <button type="submit">Upload & Predict</button>
+</form>
+
+<table id="resultTable" border="1">
+  <thead>
+    <tr>
+      <th>Timestamp</th>
+      <th>Point 1</th>
+      <th>Point 2</th>
+      <th>Point 3</th>
+      <th># People</th>
+    </tr>
+  </thead>
+  <tbody></tbody>
+</table>
+
+<script src="{{ url_for('static', filename='main.js') }}"></script>

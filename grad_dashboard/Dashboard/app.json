@@ -1,0 +1,16 @@
+{
+  "expo": {
+    "name": "WiFi CSI Dashboard",
+    "slug": "wifi-csi-dashboard",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "entryPoint": "./index.js",
+    "platforms": ["ios", "android", "web"],
+    "updates": {
+      "enabled": true
+    },
+    "assetBundlePatterns": ["**/*"]
+  }
+}
+

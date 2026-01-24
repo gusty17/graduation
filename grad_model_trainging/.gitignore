@@ -1,0 +1,10 @@
+# Ignore directories rx1 and rx2, garage, processing_2dem, and data_temp
+rx1/
+rx2/
+garage/
+processing_2dem/
+data_temp/
+# Ignore all .log files
+*.log
+# Ignore all .tmp files
+*.tmp
