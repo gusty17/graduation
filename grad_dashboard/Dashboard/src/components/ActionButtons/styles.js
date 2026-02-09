@@ -7,6 +7,7 @@ export default StyleSheet.create({
     alignItems: "center",
     gap: 15,
     marginTop: 20,
+    flexWrap: "wrap",   // ✅ ADD THIS
   },
 
   analyzeButton: {

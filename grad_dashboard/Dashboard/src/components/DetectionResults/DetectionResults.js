@@ -2,11 +2,13 @@ import { View, Text } from 'react-native';
 import PersonFigure from '../PersonFigure/PersonFigure';
 import styles from './styles';
 
-export default function DetectionResults({ confidence, activePerson }) {
+export default function DetectionResults({ confidence, activePerson, isLive }) {
   return (
     <View style={styles.resultCard}>
-      <Text style={styles.sectionTitle}>DETECTION RESULT</Text>
-
+      <View style={styles.headerRow}>
+        <Text style={styles.sectionTitle}>DETECTION RESULT</Text>
+        {isLive && <Text style={styles.liveIndicator}>● LIVE</Text>}
+      </View>
       <View style={styles.personRow}>
         {[1, 2, 3].map((n) => (
           <PersonFigure

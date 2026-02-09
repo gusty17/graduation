@@ -28,3 +28,11 @@ export async function fetchAnalytics() {
 
   return res.json();
 }
+
+/* ================= REAL-TIME SSE ================= */
+// Note: Use useLiveSSE hook in components instead of polling
+// The hook handles EventSource connection/disconnection automatically
+export function streamRealtimePredictions() {
+  // This is handled by useLiveSSE hook - do not poll manually
+  return new EventSource(`${API_URL}/realtime/stream`);
+}

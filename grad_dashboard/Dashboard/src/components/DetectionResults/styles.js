@@ -11,12 +11,26 @@ export default StyleSheet.create({
     borderColor: colors.cyanTransparent25,
   },
   
+  headerRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 10,
+    marginBottom: 25,
+  },
+
   sectionTitle: {
     color: colors.textCyan,
     textAlign: 'center',
     letterSpacing: 3,
-    marginBottom: 25,
     fontWeight: 'bold',
+  },
+
+  liveIndicator: {
+    color: '#FF3333',
+    fontSize: 12,
+    fontWeight: 'bold',
+    letterSpacing: 1.5,
   },
 
   /* PERSON FIGURES */
