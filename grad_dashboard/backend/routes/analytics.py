@@ -1,56 +1,80 @@
 from flask import Blueprint, jsonify
 import os
-from services.csv_predictor import run_prediction_on_csv
+import pandas as pd
 
-UPLOAD_FOLDER = "uploads"
+PREDICTION_LOG = "realtime_predictions.csv"
 
 analytics_bp = Blueprint("analytics", __name__)
 
-#Fetch analytics from all uploaded CSV files.
+# Fetch analytics from realtime predictions only
 @analytics_bp.route("/analytics", methods=["GET"])
 def analytics():
     analytics_data = []
 
-    # Ensure upload folder exists
-    if not os.path.exists(UPLOAD_FOLDER):
-        print(f"⚠️  Upload folder not found: {UPLOAD_FOLDER}")
-        return jsonify(analytics_data)
-
-    # Process each CSV file
-    csv_files = [f for f in os.listdir(UPLOAD_FOLDER) if f.endswith(".csv")]
-    
-    if not csv_files:
-        print("⚠️  No CSV files in uploads/")
-        return jsonify(analytics_data)
-
-    for filename in csv_files:
-        path = os.path.join(UPLOAD_FOLDER, filename)
-        
+    # Load realtime predictions
+    if os.path.exists(PREDICTION_LOG):
         try:
-            print(f"📊 Processing {filename}...")
-            predictions = run_prediction_on_csv(path)
-
-            if not predictions:
-                print(f"⚠️  No predictions for {filename}")
-                continue
-
-            # Group predictions by day (YYYY-MM-DD)
-            grouped = {}
-            for p in predictions:
-                day = p["timestamp"][:10]  # Extract date part
-                if day not in grouped:
-                    grouped[day] = []
-                grouped[day].append(p)
-
-            analytics_data.append({
-                "filename": filename,
-                "days": grouped
-            })
+            print(f"📊 Loading realtime predictions from {PREDICTION_LOG}...")
+            df = pd.read_csv(PREDICTION_LOG)
             
-            print(f"✅ {filename}: {len(predictions)} predictions across {len(grouped)} days")
+            if not df.empty:
+                # Convert to list of dictionaries
+                predictions = df.to_dict('records')
+                
+                # Group predictions by day (YYYY-MM-DD)
+                grouped = {}
+                for p in predictions:
+                    day = str(p["timestamp"])[:10]  # Extract date part
+                    if day not in grouped:
+                        grouped[day] = []
+                    grouped[day].append(p)
 
+                analytics_data.append({
+                    "filename": "realtime_predictions.csv",
+                    "days": grouped
+                })
+                
+                print(f"✅ Loaded {len(predictions)} realtime predictions across {len(grouped)} days")
+            else:
+                print("⚠️  realtime_predictions.csv is empty")
         except Exception as e:
-            print(f"❌ Error processing {filename}: {e}")
-            continue
+            print(f"⚠️  Error loading realtime predictions: {e}")
+    else:
+        print(f"⚠️  {PREDICTION_LOG} not found")
 
     return jsonify(analytics_data)
+
+
+# 🔥 Fetch raw WiFi CSI data from raw_data folder
+@analytics_bp.route("/analytics/raw", methods=["GET"])
+def get_raw_data():
+    """
+    Fetch raw WiFi CSI data collected from MQTT ingestion.
+    Returns the contents of raw_data/raw_data.csv
+    """
+    RAW_DATA_FOLDER = "raw_data"
+    RAW_DATA_CSV = os.path.join(RAW_DATA_FOLDER, "raw_data.csv")
+    
+    if not os.path.exists(RAW_DATA_CSV):
+        return jsonify({
+            "message": "No raw data available yet",
+            "data": []
+        }), 200
+    
+    try:
+        df = pd.read_csv(RAW_DATA_CSV)
+        records = df.to_dict('records')
+        
+        print(f"📊 Retrieved {len(records)} raw data records")
+        
+        return jsonify({
+            "count": len(records),
+            "data": records
+        }), 200
+    
+    except Exception as e:
+        print(f"❌ Error reading raw data: {e}")
+        return jsonify({
+            "error": str(e),
+            "data": []
+        }), 500

@@ -1,12 +1,28 @@
 import pandas as pd
 import ast
 import numpy as np
+import json
+import os
 
 # ================= CONFIG =================
-TIME_MARGIN_MS = 50        # max allowed RX1–RX2 timestamp difference
-WINDOW_SIZE = 10           # samples per window
-STEP_SIZE = 3              # sliding window step
-TARGET_CSI_LEN = 128       # fixed CSI length
+TIME_MARGIN_MS = 500
+WINDOW_SIZE = 10
+STEP_SIZE = 3
+TARGET_CSI_LEN = 128
+
+# ================= LOAD SELECTED INDICES =================
+#  Automatically load best subcarriers selected by model
+# SELECTED_IDX = list(range(TARGET_CSI_LEN)) # default (use all subcarriers if file not found)
+SELECTED_IDX_PATH = "models/selected_idx.json"
+
+if os.path.exists(SELECTED_IDX_PATH):
+    with open(SELECTED_IDX_PATH, "r") as f:
+        SELECTED_IDX = json.load(f)
+    print(f"✅ Loaded {len(SELECTED_IDX)} selected subcarriers")
+else:
+    # fallback (first run before training)
+    SELECTED_IDX = list(range(TARGET_CSI_LEN))
+    print("⚠️ selected_idx.json not found → using all subcarriers")
 
 # ================= CSI PARSING =================
 def parse_csi(x):
@@ -35,9 +51,6 @@ def fix_csi_length(csi):
 
 # ================= PREPROCESS RAW CSV =================
 def preprocess_raw_csv(path):
-    """
-    Load raw CSI CSV from disk
-    """
     df = pd.read_csv(path)
 
     df["csi_data"] = df["csi"].apply(parse_csi)
@@ -49,17 +62,11 @@ def preprocess_raw_csv(path):
 
 # ================= SPLIT & MERGE RX1 / RX2 =================
 def split_and_merge(df):
-    """
-    Merge RX1 and RX2 packets by nearest timestamp.
-    
-    Pairs RX1 and RX2 samples within TIME_MARGIN_MS of each other.
-    Returns merged DataFrame with RX1 and RX2 samples side-by-side.
-    """
     rx1 = df[df["esp_id"] == "rx1"].sort_values("timestamp")
     rx2 = df[df["esp_id"] == "rx2"].sort_values("timestamp")
 
     if rx1.empty or rx2.empty:
-        print(f"⚠️  split_and_merge: rx1={len(rx1)} rows, rx2={len(rx2)} rows")
+        print(f"⚠️ split_and_merge: rx1={len(rx1)}, rx2={len(rx2)}")
         return pd.DataFrame()
 
     merged = pd.merge_asof(
@@ -71,10 +78,9 @@ def split_and_merge(df):
         suffixes=("_RX1", "_RX2")
     )
 
-    # Remove rows where RX2 is missing
     merged = merged.dropna(subset=["rssi_RX2"])
 
-    # Ensure CSI data is fixed length
+    # Ensure CSI is fixed length
     merged["csi_data_RX1"] = merged["csi_data_RX1"].apply(fix_csi_length)
     merged["csi_data_RX2"] = merged["csi_data_RX2"].apply(fix_csi_length)
 
@@ -83,35 +89,47 @@ def split_and_merge(df):
 # ================= FEATURE EXTRACTION =================
 def extract_features(chunk):
     """
-    Extract statistical CSI + RSSI features from one window
+    Extract features using selected subcarriers (IMPORTANT)
     """
+    if len(chunk) < WINDOW_SIZE:
+        return {}
+
     csi1 = np.vstack(chunk["csi_data_RX1"])
     csi2 = np.vstack(chunk["csi_data_RX2"])
 
-    return {
-        "rssi_RX1": chunk["rssi_RX1"].mean(),
-        "rssi_RX2": chunk["rssi_RX2"].mean(),
+    # 🔥 Use selected subcarriers only
+    csi1 = csi1[:, SELECTED_IDX]
+    csi2 = csi2[:, SELECTED_IDX]
 
-        "RX1_mean": csi1.mean(),
-        "RX1_std": csi1.std(),
-        "RX1_energy": np.sum(csi1 ** 2),
+    feat = {}
 
-        "RX2_mean": csi2.mean(),
-        "RX2_std": csi2.std(),
-        "RX2_energy": np.sum(csi2 ** 2),
+    # RSSI features
+    feat["rssi_RX1"] = chunk["rssi_RX1"].mean()
+    feat["rssi_RX2"] = chunk["rssi_RX2"].mean()
 
-        "RX_diff_mean": np.mean(csi1 - csi2),
-        "RX_diff_std": np.std(csi1 - csi2),
+    # Statistical features
+    csi1_mean = np.mean(csi1, axis=0)
+    csi1_std = np.std(csi1, axis=0)
 
-        "RX1_time_var": np.var(csi1, axis=0).mean(),
-        "RX2_time_var": np.var(csi2, axis=0).mean(),
-    }
+    csi2_mean = np.mean(csi2, axis=0)
+    csi2_std = np.std(csi2, axis=0)
+
+    # Add per-subcarrier features
+    for i in range(len(SELECTED_IDX)):
+        feat[f"RX1_mean_{i}"] = csi1_mean[i]
+        feat[f"RX1_std_{i}"] = csi1_std[i]
+        feat[f"RX2_mean_{i}"] = csi2_mean[i]
+        feat[f"RX2_std_{i}"] = csi2_std[i]
+
+    # Difference between receivers
+    diff = csi1_mean - csi2_mean
+    for i in range(len(diff)):
+        feat[f"diff_{i}"] = diff[i]
+
+    return feat
 
 # ================= WINDOW AGGREGATION =================
 def build_window_features(merged_df):
-    """
-    Build sliding-window features for ML
-    """
     rows = []
     timestamps = []
 
@@ -122,10 +140,16 @@ def build_window_features(merged_df):
             continue
 
         features = extract_features(chunk)
+
+        if not features:
+            continue
+
         rows.append(features)
 
-        # center timestamp for visualization
-        timestamps.append(chunk["timestamp"].iloc[len(chunk) // 2])
+        timestamps.append(
+            chunk["timestamp"].iloc[len(chunk) // 2]
+        )
 
     X = pd.DataFrame(rows)
+
     return X, timestamps

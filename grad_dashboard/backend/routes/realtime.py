@@ -3,7 +3,7 @@ import json
 import time
 
 import state.buffers as buffers
-from services.mqtt_service import on_mqtt_message
+from services.mqtt_service import on_message
 
 realtime_bp = Blueprint("realtime", __name__)
 
@@ -46,7 +46,7 @@ def ingest_realtime_data():
         ), 400
 
     # Process through mqtt_service (which appends to buffer)
-    on_mqtt_message(data)
+    on_message(data)
 
     print(
         f"✅ Ingested {data['esp_id']} | "
