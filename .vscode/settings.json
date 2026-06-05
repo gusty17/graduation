@@ -1,0 +1,5 @@
+{
+    "python.analysis.extraPaths": [
+        "./grad_dashboard/backend"
+    ]
+}
