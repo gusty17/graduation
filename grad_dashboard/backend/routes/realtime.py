@@ -3,14 +3,14 @@ import json
 import time
 
 import state.buffers as buffers
-from services.mqtt_service import ingest_data
+from services.udp_service import start_udp_listener
 
 realtime_bp = Blueprint("realtime", __name__)
 
 @realtime_bp.route("/realtime/ingest", methods=["POST"])
 def ingest_realtime_data():
     """
-    Ingest real-time WiFi CSI data from ESP or MQTT publisher.
+    Ingest real-time WiFi CSI data from ESP or UDP publisher.
     
     Expected payload:
     {
@@ -45,8 +45,8 @@ def ingest_realtime_data():
             {"error": f"csi array too short: {len(data['csi'])} < 128"}
         ), 400
 
-    # Process through mqtt_service (which appends to buffer)
-    ingest_data(data)
+    # Process through udp_service (which appends to buffer)
+    start_udp_listener(data)
 
     #print(
     #    f"REALTIME/Ingested folder/function | "

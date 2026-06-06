@@ -3,3 +3,5 @@ pandas
 scikit-learn
 joblib
 flask-cors
+python-dotenv
+google-cloud-storage

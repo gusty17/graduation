@@ -3,20 +3,15 @@ import joblib
 import pandas as pd
 import numpy as np
 import state.buffers as buffers
-from common.feature_engineering import STEP_SIZE, WINDOW_SIZE, parse_csi, split_and_merge, build_window_features 
-#from common.all_csi_data  import STEP_SIZE, WINDOW_SIZE, parse_csi, split_and_merge, build_window_features 
-#from common.selected_index  import STEP_SIZE, WINDOW_SIZE, parse_csi, split_and_merge, build_window_features 
+from common.feature_engineering import STEP_SIZE, WINDOW_SIZE, parse_csi, split_and_merge, build_window_features
+#from common.all_csi_data  import STEP_SIZE, WINDOW_SIZE, parse_csi, split_and_merge, build_window_features
+#from common.selected_index  import STEP_SIZE, WINDOW_SIZE, parse_csi, split_and_merge, build_window_features
+from services.gcs_service import predictions_uploader
+
 # Load model
 model = joblib.load("models/rf_person_count_model.pkl")
 scaler = joblib.load("models/scaler.pkl")
 feature_columns = joblib.load("models/feature_columns.pkl")
-
-PREDICTION_LOG = "realtime_predictions.csv"
-
-if not pd.io.common.file_exists(PREDICTION_LOG):
-    pd.DataFrame(columns=[
-        "timestamp", "person_count", "confidence"
-    ]).to_csv(PREDICTION_LOG, index=False)
 
 
 def realtime_prediction_worker(socketio):
@@ -115,16 +110,8 @@ def realtime_prediction_worker(socketio):
         else:
             print("📡 SSE stream will handle delivery")
 
-        # Save to CSV
-        try:
-            pd.DataFrame([result]).to_csv(
-                PREDICTION_LOG,
-                mode="a",
-                header=False,
-                index=False
-            )
-        except Exception as e:
-            print(f"⚠️  Failed to save to CSV: {e}")
+        # Save to GCS
+        predictions_uploader.add(result)
 
 
        # ================= SLIDING WINDOW =================

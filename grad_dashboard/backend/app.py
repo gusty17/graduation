@@ -2,6 +2,9 @@ from flask import Flask
 from flask_cors import CORS
 from flask_socketio import SocketIO
 import threading
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # Routes
 from routes.realtime import realtime_bp

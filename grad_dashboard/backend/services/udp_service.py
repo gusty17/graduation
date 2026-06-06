@@ -2,8 +2,7 @@ import socket
 import struct
 from datetime import datetime
 import state.buffers as buffers
-import pandas as pd
-import os
+from services.gcs_service import csv_writer
 
 # ================= CONFIG =================
 UDP_IP = "0.0.0.0"
@@ -11,15 +10,6 @@ UDP_PORT = 5005
 
 HEADER_FORMAT = "<8sIbbH"
 HEADER_SIZE = struct.calcsize(HEADER_FORMAT)
-
-RAW_DATA_FOLDER = "raw_data"
-RAW_DATA_CSV = os.path.join(RAW_DATA_FOLDER, "raw_data.csv")
-
-# ================= SETUP =================
-# Create folder if not exists
-if not os.path.exists(RAW_DATA_FOLDER):
-    os.makedirs(RAW_DATA_FOLDER)
-    print(f"📁 Created folder: {RAW_DATA_FOLDER}")
 
 # ================= UDP LISTENER =================
 def start_udp_listener():
@@ -77,21 +67,13 @@ def start_udp_listener():
                 f"Buffer size: {len(buffers.prediction_buffer)}"
             )
 
-            # ================= SAVE TO CSV =================
-            try:
-                pd.DataFrame([{
-                    "esp_id": esp_id,
-                    "timestamp": timestamp,
-                    "rssi": int(rssi),
-                    "csi": str(csi_array)
-                }]).to_csv(
-                    RAW_DATA_CSV,
-                    mode="a",
-                    header=not os.path.exists(RAW_DATA_CSV),
-                    index=False
-                )
-            except Exception as e:
-                print("[CSV ERROR]", e)
+            # ================= SAVE TO GCS (parallel flow) =================
+            csv_writer.write_row({
+                "esp_id": esp_id,
+                "timestamp": timestamp,
+                "rssi": int(rssi),
+                "csi": str(csi_array)
+            })
 
         except Exception as e:
             print("[UDP ERROR]", e)

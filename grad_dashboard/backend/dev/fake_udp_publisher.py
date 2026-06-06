@@ -4,7 +4,7 @@ import random
 import time
 
 # ================= CONFIG =================
-UDP_IP = "192.168.8.245"   # 🔥 YOUR PC IP (IMPORTANT)
+UDP_IP = "127.0.0.1"   # localhost for local testing (change to your PC IP for real network)
 UDP_PORT = 5005
 
 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)

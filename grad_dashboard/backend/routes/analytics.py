@@ -1,56 +1,35 @@
 from flask import Blueprint, jsonify
-import os
-from services.csv_predictor import run_prediction_on_csv
-
-UPLOAD_FOLDER = "uploads"
+from services.gcs_service import read_all, RAW_GCS_PREFIX, PREDICTIONS_PREFIX
 
 analytics_bp = Blueprint("analytics", __name__)
 
-#Fetch analytics from all uploaded CSV files.
+
 @analytics_bp.route("/analytics", methods=["GET"])
 def analytics():
-    analytics_data = []
+    df = read_all(PREDICTIONS_PREFIX)
 
-    # Ensure upload folder exists
-    if not os.path.exists(UPLOAD_FOLDER):
-        print(f"⚠️  Upload folder not found: {UPLOAD_FOLDER}")
-        return jsonify(analytics_data)
+    if df.empty:
+        print("⚠️  No predictions found in GCS")
+        return jsonify([])
 
-    # Process each CSV file
-    csv_files = [f for f in os.listdir(UPLOAD_FOLDER) if f.endswith(".csv")]
-    
-    if not csv_files:
-        print("⚠️  No CSV files in uploads/")
-        return jsonify(analytics_data)
+    predictions = df.to_dict("records")
 
-    for filename in csv_files:
-        path = os.path.join(UPLOAD_FOLDER, filename)
-        
-        try:
-            print(f"📊 Processing {filename}...")
-            predictions = run_prediction_on_csv(path)
+    grouped = {}
+    for p in predictions:
+        day = str(p["timestamp"])[:10]
+        grouped.setdefault(day, []).append(p)
 
-            if not predictions:
-                print(f"⚠️  No predictions for {filename}")
-                continue
+    print(f"✅ Loaded {len(predictions)} predictions across {len(grouped)} days")
+    return jsonify([{"filename": "realtime_predictions", "days": grouped}])
 
-            # Group predictions by day (YYYY-MM-DD)
-            grouped = {}
-            for p in predictions:
-                day = p["timestamp"][:10]  # Extract date part
-                if day not in grouped:
-                    grouped[day] = []
-                grouped[day].append(p)
 
-            analytics_data.append({
-                "filename": filename,
-                "days": grouped
-            })
-            
-            print(f"✅ {filename}: {len(predictions)} predictions across {len(grouped)} days")
+@analytics_bp.route("/analytics/raw", methods=["GET"])
+def get_raw_data():
+    df = read_all(RAW_GCS_PREFIX)
 
-        except Exception as e:
-            print(f"❌ Error processing {filename}: {e}")
-            continue
+    if df.empty:
+        return jsonify({"message": "No raw data available yet", "data": []}), 200
 
-    return jsonify(analytics_data)
+    records = df.to_dict("records")
+    print(f"📊 Retrieved {len(records)} raw data records from GCS")
+    return jsonify({"count": len(records), "data": records}), 200
