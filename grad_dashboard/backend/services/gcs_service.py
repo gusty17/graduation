@@ -11,7 +11,6 @@ BUCKET_NAME = os.environ["GCS_BUCKET_NAME"]
 CREDENTIALS_PATH = os.environ["GOOGLE_APPLICATION_CREDENTIALS"]
 
 RAW_GCS_PREFIX = "raw"           # gs://bucket/raw/raw_<ts>.csv
-PREDICTIONS_PREFIX = "predictions"
 LOCAL_CSV_DIR = "raw_data"
 ROTATION_INTERVAL = int(os.environ.get("GCS_ROTATION_INTERVAL_SECONDS", 300))
 
@@ -38,29 +37,87 @@ class _CSVRotatingWriter:
     Parallel to the prediction pipeline — writes every UDP row to a local CSV.
     Every ROTATION_INTERVAL seconds:
       1. Close the current file.
-      2. Upload it to GCS under RAW_GCS_PREFIX/ (if non-empty).
+      2. Upload it to GCS under raw/{YYYY}/{MM}/{DD}/{HH}/ (if non-empty).
       3. Delete the local copy.
       4. Open a fresh CSV.
     Network I/O happens outside the lock so write_row is never blocked by uploads.
+
+    Call shutdown() before process exit to flush and upload whatever is in the
+    current (not yet rotated) file so no data is lost on restart/shutdown.
     """
 
     def __init__(self):
         self._lock = threading.Lock()
         self._file = None
         self._path = None
+        self._closed = False
         os.makedirs(LOCAL_CSV_DIR, exist_ok=True)
         self._open_new_file()
         self._schedule()
 
     def write_row(self, row: dict):
         with self._lock:
+            if self._closed:
+                return
             writer = csv.DictWriter(self._file, fieldnames=CSV_COLUMNS)
             if self._file.tell() == 0:
                 writer.writeheader()
             writer.writerow(row)
             self._file.flush()
 
+    def shutdown(self):
+        """
+        Close the active file and upload every pending CSV in LOCAL_CSV_DIR
+        to GCS before the process exits. Safe to call from a signal handler.
+        """
+        print("[GCS] 🛑 Shutdown: flushing raw data to GCS...")
+        with self._lock:
+            self._closed = True
+            try:
+                self._file.close()
+            except Exception:
+                pass
+
+        # Upload every .csv left in the local staging directory
+        for fname in os.listdir(LOCAL_CSV_DIR):
+            if not fname.endswith(".csv"):
+                continue
+            fpath = os.path.join(LOCAL_CSV_DIR, fname)
+            if os.path.getsize(fpath) == 0:
+                os.remove(fpath)
+                continue
+            blob_name = self._make_blob_name(fname)
+            try:
+                upload_file(fpath, blob_name)
+                os.remove(fpath)
+                print(f"[GCS] ✅ Shutdown upload: {fname} → gs://{BUCKET_NAME}/{blob_name}")
+            except Exception as e:
+                print(f"[GCS ERROR] Shutdown upload failed for {fname}: {e}")
+
+        print("[GCS] ✅ Shutdown flush complete")
+
     # ── internals ─────────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _make_blob_name(filename: str) -> str:
+        """
+        Build a GCS object path with time-partitioned folders:
+            raw/{YYYY}/{MM}/{DD}/{HH}/{filename}
+        Parses the UTC datetime from the filename, converts to local time for
+        the folder path so hours match the machine's timezone.
+        Falls back to local now if parsing fails.
+        """
+        try:
+            # filename format: raw_20260609T094839.csv  →  ts part = [4:19]
+            dt_utc = datetime.strptime(filename[4:19], "%Y%m%dT%H%M%S").replace(tzinfo=timezone.utc)
+            dt = dt_utc.astimezone()  # convert to local timezone
+        except (ValueError, IndexError):
+            dt = datetime.now().astimezone()
+        return (
+            f"{RAW_GCS_PREFIX}/"
+            f"year={dt.year}/month={dt.month}/day={dt.day}/hour={dt.hour}/"
+            f"{filename}"
+        )
 
     def _open_new_file(self):
         ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
@@ -73,6 +130,8 @@ class _CSVRotatingWriter:
         t.start()
 
     def _rotate(self):
+        if self._closed:
+            return
         # Swap files under the lock so write_row is blocked for the minimum time
         with self._lock:
             self._file.close()
@@ -81,7 +140,7 @@ class _CSVRotatingWriter:
 
         # Upload and clean up outside the lock
         if os.path.getsize(old_path) > 0:
-            blob_name = f"{RAW_GCS_PREFIX}/{os.path.basename(old_path)}"
+            blob_name = self._make_blob_name(os.path.basename(old_path))
             try:
                 upload_file(old_path, blob_name)
                 os.remove(old_path)
@@ -91,52 +150,6 @@ class _CSVRotatingWriter:
             os.remove(old_path)  # discard empty rotation files
 
         self._schedule()
-
-
-# ── Batch Uploader (predictions) ──────────────────────────────────────────────
-class _BatchUploader:
-    """Buffers prediction rows in memory and flushes to GCS every N rows or T seconds."""
-
-    def __init__(self, prefix: str, flush_every_n: int = 10, flush_every_seconds: int = 10):
-        self._buffer: list = []
-        self._lock = threading.Lock()
-        self._prefix = prefix
-        self._flush_every_n = flush_every_n
-        self._flush_every_seconds = flush_every_seconds
-        self._schedule_timer()
-
-    def add(self, record: dict):
-        with self._lock:
-            self._buffer.append(record)
-            if len(self._buffer) >= self._flush_every_n:
-                self._flush_locked()
-
-    def _schedule_timer(self):
-        t = threading.Timer(self._flush_every_seconds, self._on_timer)
-        t.daemon = True
-        t.start()
-
-    def _on_timer(self):
-        with self._lock:
-            self._flush_locked()
-        self._schedule_timer()
-
-    def _flush_locked(self):
-        if not self._buffer:
-            return
-        rows = list(self._buffer)
-        self._buffer.clear()
-        try:
-            df = pd.DataFrame(rows)
-            blob_name = f"{self._prefix}/{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S%f')}.csv"
-            client = _get_client()
-            bucket = client.bucket(BUCKET_NAME)
-            bucket.blob(blob_name).upload_from_string(
-                df.to_csv(index=False).encode(), content_type="text/csv"
-            )
-            print(f"[GCS] ✅ {len(rows)} predictions → gs://{BUCKET_NAME}/{blob_name}")
-        except Exception as e:
-            print(f"[GCS ERROR] Prediction flush failed: {e}")
 
 
 # ── Analytics reader ──────────────────────────────────────────────────────────
@@ -158,5 +171,4 @@ def read_all(prefix: str) -> pd.DataFrame:
 
 
 # ── Singletons ────────────────────────────────────────────────────────────────
-csv_writer = _CSVRotatingWriter()            # used by udp_service.py
-predictions_uploader = _BatchUploader(PREDICTIONS_PREFIX)  # used by inference.py
+csv_writer = _CSVRotatingWriter()   # used by udp_service.py

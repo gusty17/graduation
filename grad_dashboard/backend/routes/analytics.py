@@ -1,18 +1,17 @@
 from flask import Blueprint, jsonify
-from services.gcs_service import read_all, RAW_GCS_PREFIX, PREDICTIONS_PREFIX
+from services.gcs_service import read_all, RAW_GCS_PREFIX
+from services.bigquery_service import query_predictions
 
 analytics_bp = Blueprint("analytics", __name__)
 
 
 @analytics_bp.route("/analytics", methods=["GET"])
 def analytics():
-    df = read_all(PREDICTIONS_PREFIX)
+    predictions = query_predictions()
 
-    if df.empty:
-        print("⚠️  No predictions found in GCS")
+    if not predictions:
+        print("⚠️  No predictions found in BigQuery")
         return jsonify([])
-
-    predictions = df.to_dict("records")
 
     grouped = {}
     for p in predictions:

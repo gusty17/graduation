@@ -6,7 +6,7 @@ import state.buffers as buffers
 from common.feature_engineering import STEP_SIZE, WINDOW_SIZE, parse_csi, split_and_merge, build_window_features
 #from common.all_csi_data  import STEP_SIZE, WINDOW_SIZE, parse_csi, split_and_merge, build_window_features
 #from common.selected_index  import STEP_SIZE, WINDOW_SIZE, parse_csi, split_and_merge, build_window_features
-from services.gcs_service import predictions_uploader
+from services.bigquery_service import insert_prediction
 
 # Load model
 model = joblib.load("models/rf_person_count_model.pkl")
@@ -43,7 +43,7 @@ def realtime_prediction_worker(socketio):
             print("❌ Buffer parsing error:", e)
             continue
 
-        # 🔥 Merge RX1 & RX2
+        #  Merge RX1 & RX2
         merged = split_and_merge(df)
 
         if merged.empty or len(merged) < WINDOW_SIZE:
@@ -88,7 +88,8 @@ def realtime_prediction_worker(socketio):
         result = {
             "timestamp": str(timestamps[-1]),
             "person_count": pred,
-            "confidence": round(confidence * 100, 2)
+            "confidence": round(confidence * 100, 2),
+            "model_version": "rf_v1",
         }
 
         # Save latest prediction
@@ -110,8 +111,8 @@ def realtime_prediction_worker(socketio):
         else:
             print("📡 SSE stream will handle delivery")
 
-        # Save to GCS
-        predictions_uploader.add(result)
+        # Save to BigQuery
+        insert_prediction(result)
 
 
        # ================= SLIDING WINDOW =================

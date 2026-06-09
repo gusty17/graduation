@@ -5,3 +5,4 @@ joblib
 flask-cors
 python-dotenv
 google-cloud-storage
+google-cloud-bigquery
