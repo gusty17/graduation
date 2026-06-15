@@ -38,6 +38,30 @@ def insert_prediction(record: dict):
         print(f"[BigQuery ERROR] insert_prediction failed: {e}")
 
 
+def insert_predictions_batch(records: list) -> None:
+    """Insert multiple prediction rows into BigQuery in a single API call."""
+    if not records:
+        return
+    try:
+        client = _get_client()
+        rows = [
+            {
+                "timestamp": str(r["timestamp"]),
+                "person_count": int(r["person_count"]),
+                "confidence": float(r["confidence"]),
+                "model_version": MODEL_VERSION,
+            }
+            for r in records
+        ]
+        errors = client.insert_rows_json(_table_ref(client), rows)
+        if errors:
+            print(f"[BigQuery ERROR] Batch insert failed: {errors}")
+        else:
+            print(f"[BigQuery] ✅ Batch inserted {len(rows)} predictions")
+    except Exception as e:
+        print(f"[BigQuery ERROR] insert_predictions_batch failed: {e}")
+
+
 def query_predictions() -> list:
     """Return all predictions from BigQuery ordered by timestamp (ascending)."""
     try:

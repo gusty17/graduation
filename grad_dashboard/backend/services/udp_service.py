@@ -1,7 +1,6 @@
 import socket
 import struct
 from datetime import datetime
-import state.buffers as buffers
 from services.gcs_service import csv_writer
 
 # ================= CONFIG =================
@@ -59,15 +58,7 @@ def start_udp_listener():
                 "csi": csi_array
             }
 
-            # ================= ADD TO BUFFER =================
-            buffers.prediction_buffer.append(data_dict)
-
-            print(
-                f"[UDP BUFFER] {esp_id} | "
-                f"Buffer size: {len(buffers.prediction_buffer)}"
-            )
-
-            # ================= SAVE TO GCS (parallel flow) =================
+            # ================= SAVE TO GCS =================
             csv_writer.write_row({
                 "esp_id": esp_id,
                 "timestamp": timestamp,
