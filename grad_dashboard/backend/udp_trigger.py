@@ -1,14 +1,14 @@
 import socket
 import time
 
-# Add all ESP32 receiver IPs here
 ESP32_TARGETS = [
-    ("192.168.8.138", 3333),  # rx1
-    ("192.168.8.2", 3333),    # rx2
-     ("192.168.8.88", 3333), # rx3
+    ("192.168.8.113", 3333),  #rx2
+    ("192.168.8.2", 3333),   #rx3 
+    ("192.168.8.88", 3333), #rx1
 ]
 
-PACKET_RATE_HZ = 3  
+PACKET_RATE_HZ = 5  # was 3; raised to compensate for sender.c now dropping every
+                      # frame that isn't the new fixed CSI length
 MESSAGE = b"CSI_TRIGGER"
 
 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)

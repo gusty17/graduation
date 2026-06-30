@@ -18,8 +18,9 @@ def generate_packet(device_id):
     rssi = random.randint(-70, -40)
     channel = 1
 
-    # Generate fake CSI (128 values)
-    csi = [random.randint(-100, 100) for _ in range(128)]
+    # Generate fake CSI: 256 int8 values = 128 subcarriers (imag, real pairs),
+    # matching the fixed length the new firmware emits and COMMON_SC=128.
+    csi = [random.randint(-100, 100) for _ in range(256)]
     csi_len = len(csi)
 
     header = struct.pack(

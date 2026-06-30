@@ -10,7 +10,9 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from routes.analytics import analytics_bp
+from routes.realtime import realtime_bp
 from services.udp_service import start_udp_listener
+from services.inference import realtime_prediction_worker
 
 # ─────────────────────────────────────────
 # App setup
@@ -20,6 +22,7 @@ CORS(app)
 socketio = SocketIO(app, cors_allowed_origins="*")
 
 app.register_blueprint(analytics_bp)
+app.register_blueprint(realtime_bp)
 
 # ─────────────────────────────────────────
 # Graceful shutdown — flush raw CSVs to GCS
@@ -38,9 +41,18 @@ signal.signal(signal.SIGINT, _signal_handler)
 signal.signal(signal.SIGTERM, _signal_handler)
 
 # ─────────────────────────────────────────
-# Start UDP listener — receives ESP32 data, writes raw CSVs to GCS
+# Start UDP listener — receives ESP32 data, routes rows to the calibration /
+# prediction buffers (and to GCS only when ENABLE_GCS_RAW=1).
 # ─────────────────────────────────────────
 threading.Thread(target=start_udp_listener, daemon=True).start()
+
+# ─────────────────────────────────────────
+# Start local inference worker — empty-room calibration, then live predictions
+# streamed to the UI. Predictions are NOT sent to the cloud.
+# ─────────────────────────────────────────
+threading.Thread(
+    target=realtime_prediction_worker, args=(socketio,), daemon=True
+).start()
 
 # ─────────────────────────────────────────
 # Run server

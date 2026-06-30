@@ -1,12 +1,19 @@
 """
-Cloud Run Job — CSI Pipeline
+Cloud Run Job — CSI Pipeline (preprocessing.py edition)
 Runs on a schedule (Cloud Scheduler every 10 min).
+
+Uses the SAME feature pipeline as local inference (preprocessing.py): the model
+is trained on baseline-normalized window features, so the cloud MUST run
+clean_dataframe → build_windows → apply_baseline with the same valid_mask and
+the deployment empty-room baseline.
 
 Flow:
   1. List unprocessed raw CSVs in GCS raw/
   2. Download + concatenate all into one DataFrame
-  3. split_and_merge + build_window_features (feature_engineering.py)
-  4. Load ML model artifacts from GCS models/
+  3. clean_dataframe → build_windows → apply_baseline   (preprocessing.py)
+  4. Load model artifacts from GCS models/
+       rf_person_count_model.pkl, scaler.pkl, feature_columns.pkl,
+       valid_mask.pkl (required), deployment_baseline.pkl (empty-room baseline)
   5. Predict on all windows
   6. Batch insert all predictions into BigQuery
   7. Move processed raw CSVs to raw/done/
@@ -22,7 +29,7 @@ from google.cloud import storage, bigquery
 from google.oauth2 import service_account
 from datetime import datetime, timezone
 
-from feature_engineering import preprocess_raw_csv, split_and_merge, build_window_features
+from preprocessing import WINDOW_SEC, clean_dataframe, build_windows, apply_baseline
 
 # ── Config ────────────────────────────────────────────────────────────────────
 BUCKET_NAME        = os.environ["GCS_BUCKET_NAME"]
@@ -51,20 +58,37 @@ def _get_bq_client():
 
 
 # ── Load model artifacts from GCS ─────────────────────────────────────────────
-def load_model(gcs_client):
+def load_artifacts(gcs_client):
+    """Download every model artifact from GCS models/. valid_mask is required by
+    the cleaning step; deployment_baseline is required for valid predictions but
+    handled gracefully (warn) so the job at least runs before it's uploaded."""
     bucket = gcs_client.bucket(BUCKET_NAME)
-    artifacts = {}
-    for name in ["rf_person_count_model.pkl", "scaler.pkl", "feature_columns.pkl"]:
+
+    def _load(name, required=True):
         blob = bucket.blob(f"{MODELS_PREFIX}/{name}")
+        if not blob.exists():
+            if required:
+                raise FileNotFoundError(
+                    f"Required model artifact missing: gs://{BUCKET_NAME}/{MODELS_PREFIX}/{name}"
+                )
+            print(f"[MODEL] ⚠️  Optional artifact not found: {name}")
+            return None
         with tempfile.NamedTemporaryFile(suffix=".pkl", delete=False) as f:
             blob.download_to_filename(f.name)
-            artifacts[name] = joblib.load(f.name)
+            obj = joblib.load(f.name)
         print(f"[MODEL] Loaded {name} from GCS")
-    return (
-        artifacts["rf_person_count_model.pkl"],
-        artifacts["scaler.pkl"],
-        artifacts["feature_columns.pkl"],
-    )
+        return obj
+
+    model           = _load("rf_person_count_model.pkl")
+    scaler          = _load("scaler.pkl")
+    feature_columns = _load("feature_columns.pkl")
+    valid_mask      = _load("valid_mask.pkl")
+    baseline        = _load("deployment_baseline.pkl", required=False)
+    if baseline is None:
+        print("[MODEL] ⚠️  No deployment_baseline.pkl — predictions will NOT be "
+              "baseline-normalized and will be unreliable. Upload the empty-room "
+              "baseline produced by the backend calibration.")
+    return model, scaler, feature_columns, valid_mask, baseline
 
 
 # ── Read unprocessed raw CSVs from GCS ────────────────────────────────────────
@@ -95,20 +119,35 @@ def download_and_concat(blobs):
 
 
 # ── Run predictions ────────────────────────────────────────────────────────────
-def run_predictions(df, model, scaler, feature_columns):
-    df["csi_data"] = df["csi"].apply(lambda x: __import__("ast").literal_eval(x) if isinstance(x, str) else x)
-    df = df.dropna(subset=["csi_data"])
-    df["timestamp"] = pd.to_datetime(df["timestamp"])
-
-    merged = split_and_merge(df)
-    if merged.empty or len(merged) < 30:
-        print(f"[WARN] Not enough merged rows ({len(merged)}) — skipping")
+def run_predictions(df, model, scaler, feature_columns, valid_mask, baseline):
+    required = ["esp_id", "timestamp", "rssi", "csi"]
+    missing = [c for c in required if c not in df.columns]
+    if missing:
+        print(f"[WARN] Missing columns {missing} — skipping")
         return []
 
-    X, timestamps = build_window_features(merged)
+    # Wall-clock origin to recover each window's timestamp (build_windows works
+    # in elapsed seconds relative to the earliest row).
+    t0 = pd.to_datetime(df["timestamp"], errors="coerce").min()
+
+    # Clean + calibrate CSI (subcarrier nulls, Hampel, phase) using valid_mask.
+    cleaned, _ = clean_dataframe(df, valid_mask)
+    if cleaned.empty:
+        print("[WARN] No valid rows after cleaning — skipping")
+        return []
+
+    X = build_windows(cleaned)
     if X.empty:
         print("[WARN] Feature extraction returned empty — skipping")
         return []
+
+    # Normalize against the empty-room baseline so features match training
+    # (deviation from empty, not absolute magnitude).
+    if baseline is not None:
+        X = apply_baseline(X, baseline)
+
+    timestamps = [t0 + pd.Timedelta(seconds=ws + WINDOW_SEC / 2) for ws in X["window_start_t"]]
+    X = X.drop(columns=["window_start_t"])
 
     X = X.reindex(columns=feature_columns, fill_value=0)
     X_scaled = scaler.transform(X)
@@ -193,9 +232,9 @@ def main():
         print("[JOB] All files were empty — exiting")
         return
 
-    model, scaler, feature_columns = load_model(gcs_client)
+    model, scaler, feature_columns, valid_mask, baseline = load_artifacts(gcs_client)
 
-    results = run_predictions(df, model, scaler, feature_columns)
+    results = run_predictions(df, model, scaler, feature_columns, valid_mask, baseline)
 
     insert_predictions_batch(bq_client, results)
 

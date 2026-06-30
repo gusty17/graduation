@@ -4,6 +4,14 @@ import { useNavigation } from "@react-navigation/native";
 
 import { useWiFiCSIContext } from "../../context/WiFiCSIContext";
 import useLiveSSE from "../../hooks/useLiveSSE";
+import useCalibrationStatus from "../../hooks/useCalibrationStatus";
+
+const formatTime = (secs) => {
+  const s = Math.max(0, Math.round(secs || 0));
+  const m = Math.floor(s / 60);
+  const r = s % 60;
+  return `${m}:${String(r).padStart(2, "0")}`;
+};
 
 import Header from "../../components/Header/Header";
 import StatusCard from "../../components/StatusCard/StatusCard";
@@ -22,6 +30,8 @@ export default function DashboardScreen() {
   const [isLive, setIsLive] = useState(false);
   const [analyzeClicked, setAnalyzeClicked] = useState(false);
   const liveData = useLiveSSE(isLive);
+  const calib = useCalibrationStatus(isLive);
+  const isCalibrating = isLive && calib?.phase === "calibrating";
 
   const handleAnalyze = () => {
     setAnalyzeClicked(true);
@@ -44,11 +54,20 @@ export default function DashboardScreen() {
       <StatusCard
         icon="🎯"
         title="DETECTION STATUS"
-        value={isLive ? "LIVE MODE" : wifi.detectionStatus}
+        value={isLive ? (isCalibrating ? "CALIBRATING" : "LIVE MODE") : wifi.detectionStatus}
       />
 
-      {/* LIVE STATUS */}
-      {isLive && (
+      {/* CALIBRATION PHASE — empty-room baseline measurement on startup */}
+      {isCalibrating && (
+        <StatusCard
+          icon="🧪"
+          title="CALIBRATION — KEEP ROOM EMPTY"
+          value={`Measuring empty room… ${formatTime(calib.remaining)} remaining`}
+        />
+      )}
+
+      {/* LIVE STATUS — only after calibration finishes */}
+      {isLive && !isCalibrating && (
         <StatusCard
           icon="👥"
           title="REAL-TIME OCCUPANCY"
