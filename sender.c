@@ -16,10 +16,10 @@
 #include "lwip/sockets.h"
 #include "lwip/inet.h"
 
-#define WIFI_SSID       "WE_C7354E"
-#define WIFI_PASS       "20144497500"
+#define WIFI_SSID       "E5586_66C9"
+#define WIFI_PASS       "h6uxwwfgmem"
 
-#define LAPTOP_IP       "192.168.8.245"
+#define LAPTOP_IP       "192.168.8.80"
 #define LAPTOP_PORT     5005
 
 #define DEVICE_ID       "rx2"

@@ -7,10 +7,19 @@ import signal
 import sys
 from dotenv import load_dotenv
 
+# The backend logs emoji everywhere; on a non-UTF-8 Windows console that raises
+# UnicodeEncodeError and can kill the UDP/worker threads. Force UTF-8 stdout.
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
+
 load_dotenv()
 
 from routes.analytics import analytics_bp
 from routes.realtime import realtime_bp
+from routes.collect import collect_bp
 from services.udp_service import start_udp_listener
 from services.inference import realtime_prediction_worker
 
@@ -23,6 +32,7 @@ socketio = SocketIO(app, cors_allowed_origins="*")
 
 app.register_blueprint(analytics_bp)
 app.register_blueprint(realtime_bp)
+app.register_blueprint(collect_bp)
 
 # ─────────────────────────────────────────
 # Graceful shutdown — flush raw CSVs to GCS

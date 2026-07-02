@@ -1,8 +1,10 @@
 import socket
 import struct
+import time
 from datetime import datetime
 
 import state.buffers as buffers
+import services.collector_service as collector
 
 # ================= CONFIG =================
 UDP_IP = "0.0.0.0"
@@ -49,14 +51,25 @@ def start_udp_listener():
         ENABLE_GCS_RAW=1, are also streamed to GCS for the cloud pipeline.
     """
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    # Large receive buffer so brief processing stalls don't overflow the kernel
+    # queue and drop CSI packets (the main cause of a low capture rate).
+    try:
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4 << 20)  # 4 MB
+    except OSError:
+        pass
     sock.bind((UDP_IP, UDP_PORT))
     print(f"[UDP] Listening on port {UDP_PORT}...")
+
+    # Per-receiver counters + a throttled heartbeat. Printing on EVERY packet
+    # (console I/O is slow, esp. on Windows) stalls the loop and drops packets,
+    # so we print at most once per second instead.
+    seen = {"rx1": 0, "rx2": 0, "rx3": 0}
+    last_report = time.monotonic()
 
     while True:
         data, addr = sock.recvfrom(4096)
 
         if len(data) < HEADER_SIZE:
-            print("[UDP] Packet too small")
             continue
 
         try:
@@ -66,17 +79,26 @@ def start_udp_listener():
             device_id_raw, esp_timestamp, rssi, channel, csi_len = struct.unpack(
                 HEADER_FORMAT, header
             )
-            esp_id = device_id_raw.decode(errors="ignore").strip("\x00").lower()
+            # Prefer sender IP (reliable on real hardware), fall back to packet id.
+            esp_id = collector.resolve_esp_id(addr[0], device_id_raw)
 
             if len(csi_raw) != csi_len:
-                print("[UDP] CSI length mismatch")
                 continue
 
             csi_array = list(struct.unpack(f"{csi_len}b", csi_raw))
             timestamp = datetime.now().isoformat()
 
-            # Per-packet confirmation so all 3 ESPs are visible in the terminal.
-            print(f"📡 {esp_id} | rssi={rssi} | csi_len={csi_len}")
+            if esp_id in seen:
+                seen[esp_id] += 1
+            now = time.monotonic()
+            if now - last_report >= 1.0:
+                print(f"📡 [UDP] rx1={seen['rx1']} rx2={seen['rx2']} rx3={seen['rx3']} (cumulative)")
+                last_report = now
+
+            # Training-data collection takes over the stream when active: write
+            # the row to the session CSV and skip the live prediction/GCS path.
+            if collector.record(esp_id, timestamp, rssi, csi_array, csi_len):
+                continue
 
             row = {
                 "esp_id": esp_id,

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { ScrollView, View } from "react-native";
+import { ScrollView, View, TouchableOpacity, Text } from "react-native";
 import { useNavigation } from "@react-navigation/native";
 
 import { useWiFiCSIContext } from "../../context/WiFiCSIContext";
@@ -20,6 +20,7 @@ import TimestampSelector from "../../components/TimestampSelector/TimestampSelec
 import DetectionResults from "../../components/DetectionResults/DetectionResults";
 import ActionButtons from "../../components/ActionButtons/ActionButtons";
 import PlayButton from "../../components/PlayButton/PlayButton";
+import CollectDataModal from "../../components/CollectDataModal/CollectDataModal";
 
 import styles from "./styles";
 
@@ -28,6 +29,7 @@ export default function DashboardScreen() {
   const navigation = useNavigation();
 
   const [isLive, setIsLive] = useState(false);
+  const [showCollect, setShowCollect] = useState(false);
   const [analyzeClicked, setAnalyzeClicked] = useState(false);
   const liveData = useLiveSSE(isLive);
   const calib = useCalibrationStatus(isLive);
@@ -50,6 +52,24 @@ export default function DashboardScreen() {
   return (
     <ScrollView style={styles.container}>
       <Header />
+
+      {/* TRAINING-DATA COLLECTION — opens the guided recording modal */}
+      <TouchableOpacity
+        style={{
+          backgroundColor: "rgba(0,255,255,0.12)",
+          borderWidth: 1.5,
+          borderColor: "#00ffff",
+          borderRadius: 12,
+          paddingVertical: 12,
+          alignItems: "center",
+          marginBottom: 15,
+        }}
+        onPress={() => setShowCollect(true)}
+      >
+        <Text style={{ color: "#00ffff", fontWeight: "bold", letterSpacing: 2 }}>
+          🧪 COLLECT TRAINING DATA
+        </Text>
+      </TouchableOpacity>
 
       <StatusCard
         icon="🎯"
@@ -130,6 +150,11 @@ export default function DashboardScreen() {
           </View>
         </View>
       </View>
+
+      <CollectDataModal
+        visible={showCollect}
+        onClose={() => setShowCollect(false)}
+      />
     </ScrollView>
   );
 }

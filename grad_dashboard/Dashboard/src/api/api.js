@@ -63,3 +63,38 @@ export async function stopLivePrediction() {
 
   return res.json();
 }
+
+/* ================= TRAINING DATA COLLECTION ================= */
+export async function fetchCollectSessions() {
+  const res = await fetch(`${API_URL}/collect/sessions`);
+  if (!res.ok) throw new Error("Failed to load sessions");
+  return res.json();
+}
+
+export async function startCollection({ label, session, duration }) {
+  const res = await fetch(`${API_URL}/collect/start`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ label, session, duration }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || "Failed to start collection");
+  }
+  return res.json();
+}
+
+export async function stopCollection() {
+  const res = await fetch(`${API_URL}/collect/stop`, { method: "POST" });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || "Failed to stop collection");
+  }
+  return res.json();
+}
+
+export async function fetchCollectStatus() {
+  const res = await fetch(`${API_URL}/collect/status`);
+  if (!res.ok) throw new Error("Failed to load collection status");
+  return res.json();
+}
